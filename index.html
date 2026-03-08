@@ -318,7 +318,7 @@ function CustomerSite({cart,setCart,onAdminOpen,onPlaceOrder}){
 }
 
 // ═══════════════════════════════════════════════════════ OWNER TRACKER
-function OwnerTracker({onBack,newOrderFromSite,clearNewOrder}){
+function OwnerTracker({onBack}){
   const [orders,setOrders]           = useState([]);
   const [loaded,setLoaded]           = useState(false);
   const [tab,setTab]                 = useState("all");
@@ -330,25 +330,33 @@ function OwnerTracker({onBack,newOrderFromSite,clearNewOrder}){
   const [csvText,setCsvText]         = useState("");
   const [copied,setCopied]           = useState(false);
   const [form,setForm]               = useState({customer:"",phone:"",address:"",note:"",items:[{name:MENU_NAMES[0],qty:1}]});
+  const [newCount,setNewCount]       = useState(0);
 
-  useEffect(()=>{
+  function refreshOrders(silent){
     loadOrders().then(saved=>{
       syncIdCounter(saved);
-      setOrders(saved.length?saved:[]);
-      setLoaded(true);
+      const fresh = saved.length?saved:[];
+      setOrders(prev=>{
+        const prevNew = prev.filter(o=>o.status==="New Order").length;
+        const nextNew = fresh.filter(o=>o.status==="New Order").length;
+        if(!silent && nextNew > prevNew) setNewCount(nextNew - prevNew);
+        return fresh;
+      });
+      if(!loaded) setLoaded(true);
     });
-  },[]);
+  }
 
-  useEffect(()=>{ if(loaded) saveOrders(orders); },[orders,loaded]);
+  // Initial load
+  useEffect(()=>{ refreshOrders(true); },[]);
 
+  // Auto-refresh every 15 seconds to catch new customer orders
   useEffect(()=>{
-    if(newOrderFromSite&&loaded){
-      const id=newId();
-      setOrders(o=>[{id,...newOrderFromSite,status:"New Order",time:nowTime(),date:todayDate(),isoDate:isoDate()},...o]);
-      showT("New order "+id+" added!");
-      clearNewOrder();
-    }
-  },[newOrderFromSite,loaded]);
+    const timer = setInterval(()=>refreshOrders(false), 15000);
+    return ()=>clearInterval(timer);
+  },[loaded]);
+
+  // Save whenever orders change (after initial load)
+  useEffect(()=>{ if(loaded) saveOrders(orders); },[orders,loaded]);
 
   function showT(m){ setToast(m); setTimeout(()=>setToast(""),2800); }
 
@@ -369,13 +377,17 @@ function OwnerTracker({onBack,newOrderFromSite,clearNewOrder}){
   function deleteOrder(id){ setOrders(o=>o.filter(x=>x.id!==id)); showT("Deleted"); }
 
   function notifyWA(order,status){
-    const ph=order.phone.replace(/\D/g,"");
-    if(!ph){ showT("No phone number on this order!"); return; }
+    const ph=(order.phone||"").replace(/\D/g,"");
+    if(!ph){
+      showT("⚠️ No phone number saved for "+order.customer+" — cannot send WhatsApp!");
+      return;
+    }
     const fn=WA_STATUS_MSG[status]; if(!fn) return;
     const itemsText=order.items.map(i=>"  - "+i.name+" x"+i.qty+" = Rs."+(PRICES[i.name]||0)*i.qty).join("\n");
     const msg=fn(order.customer.split(" ")[0],itemsText,getTotal(order.items));
-    window.open("https://wa.me/"+(ph.startsWith("91")?ph:"91"+ph)+"?text="+encodeURIComponent(msg),"_blank");
-    showT("WhatsApp opened for "+order.customer);
+    const full=ph.startsWith("91")?ph:"91"+ph;
+    window.open("https://wa.me/"+full+"?text="+encodeURIComponent(msg),"_blank");
+    showT("💬 WhatsApp opened → sending to "+order.customer+" ("+order.phone+")");
   }
 
   function notifyAndUpdate(order,status){ updateStatus(order.id,status); notifyWA({...order,status},status); }
@@ -429,14 +441,21 @@ function OwnerTracker({onBack,newOrderFromSite,clearNewOrder}){
       <div style={{background:"#075E54",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
         <div>
           <div style={{color:"#fff",fontWeight:900,fontSize:16}}>BKB Order Tracker</div>
-          <div style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>Auto-saving - Stores up to 1 year</div>
+          <div style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>Auto-refreshes every 15s</div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={()=>{ refreshOrders(false); showT("Refreshed!"); }} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",padding:"9px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>🔄 Refresh</button>
           <button onClick={()=>setShowExport(true)} style={{background:"#facc15",border:"none",color:"#000",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>Download</button>
           <button onClick={()=>setShowForm(true)} style={{background:"#25D366",border:"none",color:"#fff",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>New Order</button>
           <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",padding:"9px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>Back</button>
         </div>
       </div>
+      {newCount>0&&(
+        <div style={{background:"#ff6b00",color:"#fff",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
+          <span>🆕 {newCount} new order{newCount>1?"s":""} arrived!</span>
+          <button onClick={()=>setNewCount(0)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",padding:"4px 10px",borderRadius:10,cursor:"pointer",fontSize:12}}>Dismiss</button>
+        </div>
+      )}
 
       <div style={{padding:"14px",maxWidth:900,margin:"0 auto"}}>
 
@@ -600,20 +619,34 @@ function AdminLogin({onSuccess,onBack}){
 
 // ═══════════════════════════════════════════════════════ ROOT
 function App(){
-  const [view,setView]               = useState("site");
-  const [cart,setCart]               = useState({});
-  const [pendingOrder,setPendingOrder] = useState(null);
+  const [view,setView] = useState("site");
+  const [cart,setCart] = useState({});
 
-  function handlePlaceOrder(cartData,customerName,customerPhone,customerAddress){
+  async function handlePlaceOrder(cartData,customerName,customerPhone,customerAddress){
     const items=Object.entries(cartData).map(([id,qty])=>{const it=ALL_ITEMS.find(i=>i.id===+id);return{name:it.name,qty};});
-    setPendingOrder({customer:customerName||"Website Customer",phone:customerPhone||"",address:customerAddress||"",note:"Via Website Cart",items});
+    const existing = await loadOrders();
+    syncIdCounter(existing);
+    const id = newId();
+    const newOrder = {
+      id,
+      customer: customerName||"Website Customer",
+      phone: customerPhone||"",
+      address: customerAddress||"",
+      note: "Via Website Cart",
+      items,
+      status: "New Order",
+      time: nowTime(),
+      date: todayDate(),
+      isoDate: isoDate()
+    };
+    await saveOrders([newOrder, ...existing]);
   }
 
   return(
     <React.Fragment>
       {view==="site"    && <CustomerSite cart={cart} setCart={setCart} onAdminOpen={()=>setView("login")} onPlaceOrder={handlePlaceOrder}/>}
       {view==="login"   && <AdminLogin onSuccess={()=>setView("tracker")} onBack={()=>setView("site")}/>}
-      {view==="tracker" && <OwnerTracker onBack={()=>setView("site")} newOrderFromSite={pendingOrder} clearNewOrder={()=>setPendingOrder(null)}/>}
+      {view==="tracker" && <OwnerTracker onBack={()=>setView("site")}/>}
     </React.Fragment>
   );
 }
