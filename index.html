@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Biriyani Kaavala Babu 🍛</title>
+  <meta name="description" content="Authentic biryanis, sizzling starters & flavour-packed fried rice — cooked fresh, delivered with love!"/>
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍛</text></svg>"/>
+  <!-- React + ReactDOM -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel (compiles JSX/TSX in the browser) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+    #root{min-height:100vh;}
+    /* Hide Babel compilation notice */
+    .babel-repl-notice{display:none!important;}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect } = React;
+
+    const WHATSAPP_NUMBER = "918500247911";
+    const ADMIN_PASSWORD  = "bkb2024";
+
+    // ── MENU DATA ────────────────────────────────────────────────────────────────
+    const MENU = {
+      biryani: [
+        {id:1, name:"Chicken Dum Biryani",        price:200, emoji:"🍛", type:"nonveg"},
+        {id:2, name:"Chicken Fried Rice Biryani",  price:200, emoji:"🍲", type:"nonveg"},
+      ],
+      friedrice: [
+        {id:3, name:"Egg Fried Rice",             price:80,  emoji:"🍳", type:"nonveg"},
+        {id:4, name:"Veg Fried Rice",             price:70,  emoji:"🍚", type:"veg"},
+        {id:5, name:"Veg Manchurian Fried Rice",  price:75,  emoji:"🥦", type:"veg"},
+        {id:6, name:"Chicken Fried Rice",         price:90,  emoji:"🍗", type:"nonveg"},
+      ],
+      starters: [
+        {id:7, name:"Chili Chicken",              price:120, emoji:"🌶️", type:"nonveg"},
+        {id:8, name:"Chicken 65",                 price:120, emoji:"🍗", type:"nonveg"},
+        {id:9, name:"Chicken Manchurian",         price:100, emoji:"🥘", type:"nonveg"},
+      ],
+    };
+    const ALL_ITEMS  = [...MENU.biryani, ...MENU.friedrice, ...MENU.starters];
+    const MENU_NAMES = ALL_ITEMS.map(i => i.name);
+    const PRICES     = Object.fromEntries(ALL_ITEMS.map(i => [i.name, i.price]));
+
+    const STATUSES = ["New Order","Confirmed","Cooking","Out for Delivery","Delivered","Cancelled"];
+    const STATUS_STYLE = {
+      "New Order":        {bg:"#fff3cd", text:"#856404", dot:"#ffc107"},
+      "Confirmed":        {bg:"#cce5ff", text:"#003d7a", dot:"#1a73e8"},
+      "Cooking":          {bg:"#ffe5cc", text:"#7a3800", dot:"#ff6b00"},
+      "Out for Delivery": {bg:"#e0d4ff", text:"#3b0082", dot:"#7c3aed"},
+      "Delivered":        {bg:"#d4edda", text:"#155724", dot:"#25D366"},
+      "Cancelled":        {bg:"#f8d7da", text:"#721c24", dot:"#e74c3c"},
+    };
+    const NEXT = {
+      "New Order":"Confirmed",
+      "Confirmed":"Cooking",
+      "Cooking":"Out for Delivery",
+      "Out for Delivery":"Delivered"
+    };
+    const WA_MSG = {
+      "Confirmed":        (n,items,t) => `🍛 *Biriyani Kaavala Babu*\n\nHi ${n}! ✅ Order *confirmed*!\n\n${items}\n💰 Total: ₹${t}\n\nWe'll start cooking shortly 🔥`,
+      "Cooking":          (n)         => `🍛 *Biriyani Kaavala Babu*\n\nHi ${n}! 👨‍🍳 Your biryani is *being cooked*!\n⏱️ Ready in 30–45 mins 🔥`,
+      "Out for Delivery": (n)         => `🍛 *Biriyani Kaavala Babu*\n\nHi ${n}! 🛵 Order is *on the way*!\nGet ready 😋`,
+      "Delivered":        (n)         => `🍛 *Biriyani Kaavala Babu*\n\nHi ${n}! 🎉 Order *delivered*!\nEnjoy your meal! 😋\n⭐ Rate us — it means a lot!\nThank you for choosing BKB! 🙏`,
+      "Cancelled":        (n)         => `🍛 *Biriyani Kaavala Babu*\n\nHi ${n}, sorry 🙏 Order was *cancelled*.\nReorder: wa.me/${WHATSAPP_NUMBER}`,
+    };
+
+    function getTotal(items){ return items.reduce((s,i) => (PRICES[i.name]||0)*i.qty + s, 0); }
+    function nowTime(){ const d=new Date(); return d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
+    function todayDate(){ return new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); }
+    function isoDate(){ return new Date().toISOString().slice(0,10); }
+
+    let _nextId = 1000;
+    function newId(){ return "BKB"+String(++_nextId).padStart(4,"0"); }
+    function syncIdCounter(orders){
+      orders.forEach(o => {
+        const n = parseInt((o.id||"").replace("BKB",""), 10);
+        if(!isNaN(n) && n > _nextId) _nextId = n;
+      });
+    }
+
+    // ── STORAGE HELPERS (localStorage for real deployment) ───────────────────────
+    const STORE_KEY = "bkb-orders-v1";
+
+    async function loadOrders(){
+      try{
+        const raw = localStorage.getItem(STORE_KEY);
+        if(raw){
+          const all = JSON.parse(raw);
+          const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
+          return all.filter(o => new Date(o.isoDate||"2000-01-01") >= cutoff);
+        }
+      }catch(e){}
+      return [];
+    }
+
+    async function saveOrders(orders){
+      try{ localStorage.setItem(STORE_KEY, JSON.stringify(orders)); }catch(e){}
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // CUSTOMER WEBSITE
+    // ═════════════════════════════════════════════════════════════════════════════
+    function CustomerSite({cart, setCart, onAdminOpen, onPlaceOrder}){
+      const [cartOpen, setCartOpen] = useState(false);
+      const [toast, setToast]       = useState("");
+      const sf = {saffron:"#FF6B00", gold:"#FFB347", dark:"#1A0A00", cream:"#FFF8F0"};
+
+      function addItem(id){ setCart(c => ({...c, [id]:(c[id]||0)+1})); }
+      function removeItem(id){ setCart(c => { const n={...c}; n[id]=(n[id]||1)-1; if(!n[id]) delete n[id]; return n; }); }
+      const total = Object.entries(cart).reduce((s,[id,q]) => s+(ALL_ITEMS.find(i=>i.id===+id)?.price||0)*q, 0);
+      const count = Object.values(cart).reduce((s,v) => s+v, 0);
+
+      function showToast(m){ setToast(m); setTimeout(()=>setToast(""), 2500); }
+
+      function orderOnWA(){
+        if(!count) return;
+        const lines = Object.entries(cart).map(([id,q]) => {
+          const it = ALL_ITEMS.find(i=>i.id===+id);
+          return `  ${it.emoji} ${it.name} ×${q} — ₹${it.price*q}`;
+        });
+        const msg = `🍛 *Biriyani Kaavala Babu*\n\nHey! I'd like to place an order 😄\n\n*My Order:*\n${lines.join("\n")}\n\n💰 *Total: ₹${total}*\n\nPlease confirm & share payment details 🙏`;
+        onPlaceOrder(cart);
+        window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, "_blank");
+        setCart({});
+        setCartOpen(false);
+        showToast("✅ Order sent to WhatsApp & Tracker!");
+      }
+
+      function ItemCard({item}){
+        const qty = cart[item.id]||0;
+        return(
+          <div style={{background:"linear-gradient(145deg,#2d1200,#1a0a00)",border:"1px solid rgba(255,107,0,0.15)",borderRadius:20,padding:18,display:"flex",flexDirection:"column"}}>
+            <div style={{fontSize:"2.2rem",marginBottom:8}}>{item.emoji}</div>
+            <div style={{fontWeight:700,color:sf.cream,marginBottom:6,fontSize:13,lineHeight:1.3}}>{item.name}</div>
+            <span style={{fontSize:10,padding:"2px 8px",borderRadius:20,fontWeight:700,display:"inline-block",marginBottom:10,background:item.type==="veg"?"rgba(46,204,113,0.15)":"rgba(231,76,60,0.15)",color:item.type==="veg"?"#2ecc71":"#e74c3c",border:`1px solid ${item.type==="veg"?"rgba(46,204,113,0.3)":"rgba(231,76,60,0.3)"}`}}>
+              {item.type==="veg"?"🟢 Veg":"🔴 Non-Veg"}
+            </span>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:"auto"}}>
+              <div style={{fontSize:"1.1rem",fontWeight:700,color:sf.saffron}}>₹{item.price}</div>
+              {qty===0
+                ? <button onClick={()=>addItem(item.id)} style={{background:sf.saffron,border:"none",color:"#fff",width:34,height:34,borderRadius:"50%",fontSize:18,cursor:"pointer",boxShadow:"0 4px 12px rgba(255,107,0,0.4)"}}>+</button>
+                : <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <button onClick={()=>removeItem(item.id)} style={{background:"rgba(255,107,0,0.2)",border:`1px solid ${sf.saffron}`,color:sf.saffron,width:28,height:28,borderRadius:"50%",cursor:"pointer",fontSize:14}}>−</button>
+                    <span style={{fontWeight:700,minWidth:16,textAlign:"center",color:sf.cream,fontSize:13}}>{qty}</span>
+                    <button onClick={()=>addItem(item.id)} style={{background:"rgba(255,107,0,0.2)",border:`1px solid ${sf.saffron}`,color:sf.saffron,width:28,height:28,borderRadius:"50%",cursor:"pointer",fontSize:14}}>+</button>
+                  </div>
+              }
+            </div>
+          </div>
+        );
+      }
+
+      return(
+        <div style={{background:sf.dark,minHeight:"100vh",color:sf.cream,fontFamily:"'Inter',sans-serif"}}>
+          {/* Hero */}
+          <div style={{minHeight:"65vh",background:"radial-gradient(ellipse at 60% 40%,#7a2e00,#1A0A00)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",padding:"40px 20px",position:"relative",overflow:"hidden"}}>
+            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14rem",opacity:0.03,userSelect:"none"}}>🍛</div>
+            <div style={{background:sf.saffron,color:"#fff",fontSize:11,fontWeight:700,letterSpacing:3,textTransform:"uppercase",padding:"5px 16px",borderRadius:30,marginBottom:16}}>☁️ Cloud Kitchen · Order Now</div>
+            <h1 style={{fontSize:"clamp(2.5rem,9vw,5rem)",fontWeight:900,lineHeight:1,background:`linear-gradient(135deg,${sf.gold},${sf.saffron},#FFD700)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",marginBottom:8}}>Biriyani<br/>Kaavala<br/>Babu</h1>
+            <p style={{fontFamily:"cursive",fontSize:"clamp(1rem,3vw,1.4rem)",color:sf.gold,marginBottom:14}}>Flavor that hits different every time 🔥</p>
+            <p style={{maxWidth:380,fontSize:13,color:"#d4b8a0",marginBottom:28,lineHeight:1.7}}>Authentic biryanis, sizzling starters & flavour-packed fried rice — cooked fresh, delivered with love!</p>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
+              <button onClick={()=>setCartOpen(true)} style={{background:"#25D366",color:"#fff",padding:"13px 26px",borderRadius:50,fontSize:14,fontWeight:700,border:"none",cursor:"pointer",boxShadow:"0 8px 25px rgba(37,211,102,0.4)"}}>🛒 Order Now</button>
+              <button onClick={()=>document.getElementById("bkb-menu").scrollIntoView({behavior:"smooth"})} style={{background:"transparent",border:`2px solid ${sf.saffron}`,color:sf.saffron,padding:"13px 26px",borderRadius:50,fontSize:14,fontWeight:700,cursor:"pointer"}}>🍽️ View Menu</button>
+            </div>
+          </div>
+
+          {/* Nav */}
+          <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(26,10,0,0.97)",backdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,107,0,0.2)",padding:"0 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+            <div style={{fontWeight:900,fontSize:16,color:sf.gold,padding:"13px 0"}}>🍛 BKB</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setCartOpen(true)} style={{background:sf.saffron,border:"none",color:"#fff",padding:"8px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+                🛒 <span style={{background:"#fff",color:sf.saffron,borderRadius:"50%",width:18,height:18,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800}}>{count}</span>
+              </button>
+              <button onClick={onAdminOpen} style={{background:"rgba(255,107,0,0.1)",border:`1px solid rgba(255,107,0,0.3)`,color:sf.saffron,padding:"8px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>👨‍🍳 Owner</button>
+            </div>
+          </div>
+
+          {/* Menu */}
+          <div id="bkb-menu" style={{maxWidth:1000,margin:"0 auto",padding:"36px 16px"}}>
+            <div style={{textAlign:"center",marginBottom:32}}>
+              <h2 style={{fontFamily:"serif",fontSize:"clamp(1.8rem,5vw,3rem)",fontWeight:900,color:sf.cream}}>Our Menu</h2>
+              <p style={{color:"#d4b8a0",fontSize:13}}>Every dish cooked fresh 🔥</p>
+            </div>
+            {[["biryani","🍛","Biryani"],["friedrice","🍚","Fried Rice"],["starters","🍗","Starters"]].map(([cat,emoji,label])=>(
+              <div key={cat} style={{marginBottom:36}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                  <span style={{fontSize:"1.6rem"}}>{emoji}</span>
+                  <h3 style={{fontFamily:"serif",fontSize:"1.4rem",color:sf.gold}}>{label}</h3>
+                  <div style={{flex:1,height:1,background:"linear-gradient(to right,rgba(255,179,71,0.3),transparent)"}}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:14}}>
+                  {MENU[cat].map(item => <ItemCard key={item.id} item={item}/>)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{textAlign:"center",padding:"28px 20px",borderTop:"1px solid rgba(255,107,0,0.15)",color:"#7a5a40",fontSize:12}}>
+            Made with ❤️ by <strong style={{color:sf.gold}}>Biriyani Kaavala Babu</strong> · Cloud Kitchen 🍛
+          </div>
+
+          {/* Cart Drawer */}
+          {cartOpen&&(
+            <div style={{position:"fixed",inset:0,zIndex:100}}>
+              <div onClick={()=>setCartOpen(false)} style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.7)"}}/>
+              <div style={{position:"absolute",right:0,top:0,bottom:0,width:"min(380px,100vw)",background:"#1e0d00",borderLeft:"1px solid rgba(255,107,0,0.2)",display:"flex",flexDirection:"column"}}>
+                <div style={{padding:"18px",borderBottom:"1px solid rgba(255,107,0,0.2)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{fontFamily:"serif",fontSize:"1.2rem",fontWeight:900,color:sf.gold}}>🛒 Your Order</span>
+                  <button onClick={()=>setCartOpen(false)} style={{background:"rgba(255,107,0,0.1)",border:"1px solid rgba(255,107,0,0.3)",color:sf.saffron,width:32,height:32,borderRadius:"50%",cursor:"pointer",fontSize:13}}>✕</button>
+                </div>
+                <div style={{flex:1,overflowY:"auto",padding:14}}>
+                  {count===0
+                    ? <div style={{textAlign:"center",padding:"50px 20px",color:"#7a5a40"}}><div style={{fontSize:"2.5rem"}}>🍽️</div><p style={{marginTop:8,fontSize:13}}>Cart is empty!</p></div>
+                    : Object.entries(cart).map(([id,q])=>{ const it=ALL_ITEMS.find(i=>i.id===+id); return(
+                        <div key={id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                          <span style={{fontSize:"1.4rem"}}>{it.emoji}</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12,fontWeight:700,color:sf.cream}}>{it.name}</div>
+                            <div style={{fontSize:11,color:sf.saffron}}>₹{it.price}×{q} = ₹{it.price*q}</div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:5}}>
+                            <button onClick={()=>removeItem(+id)} style={{background:"rgba(255,107,0,0.2)",border:`1px solid ${sf.saffron}`,color:sf.saffron,width:26,height:26,borderRadius:"50%",cursor:"pointer",fontSize:13}}>−</button>
+                            <span style={{fontWeight:700,color:sf.cream,minWidth:14,textAlign:"center",fontSize:12}}>{q}</span>
+                            <button onClick={()=>addItem(+id)} style={{background:"rgba(255,107,0,0.2)",border:`1px solid ${sf.saffron}`,color:sf.saffron,width:26,height:26,borderRadius:"50%",cursor:"pointer",fontSize:13}}>+</button>
+                          </div>
+                        </div>
+                      );})
+                  }
+                </div>
+                <div style={{padding:16,borderTop:"1px solid rgba(255,107,0,0.2)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,marginBottom:12,color:sf.cream}}>
+                    <span>Total</span><span style={{color:sf.saffron}}>₹{total}</span>
+                  </div>
+                  <button onClick={orderOnWA} disabled={!count} style={{width:"100%",background:count?"#25D366":"#444",border:"none",color:"#fff",padding:14,borderRadius:28,fontWeight:800,fontSize:14,cursor:count?"pointer":"not-allowed",boxShadow:count?"0 8px 25px rgba(37,211,102,0.4)":"none"}}>
+                    💬 Place Order on WhatsApp
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"#25D366",color:"#fff",padding:"11px 22px",borderRadius:50,fontWeight:700,fontSize:13,zIndex:200,whiteSpace:"nowrap"}}>{toast}</div>}
+        </div>
+      );
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // OWNER TRACKER
+    // ═════════════════════════════════════════════════════════════════════════════
+    function OwnerTracker({onBack, newOrderFromSite, clearNewOrder}){
+      const [orders,setOrders]           = useState([]);
+      const [loaded,setLoaded]           = useState(false);
+      const [tab,setTab]                 = useState("all");
+      const [search,setSearch]           = useState("");
+      const [showForm,setShowForm]       = useState(false);
+      const [toast,setToast]             = useState("");
+      const [showExport,setShowExport]   = useState(false);
+      const [exportRange,setExportRange] = useState("today");
+      const [csvText,setCsvText]         = useState("");
+      const [copied,setCopied]           = useState(false);
+      const [form,setForm]               = useState({customer:"",phone:"",address:"",note:"",items:[{name:MENU_NAMES[0],qty:1}]});
+
+      // Load from localStorage on mount
+      useEffect(()=>{
+        loadOrders().then(saved => {
+          syncIdCounter(saved);
+          setOrders(saved.length ? saved : []);
+          setLoaded(true);
+        });
+      },[]);
+
+      // Save whenever orders change (after initial load)
+      useEffect(()=>{
+        if(loaded) saveOrders(orders);
+      },[orders,loaded]);
+
+      // Auto-receive order placed from customer site
+      useEffect(()=>{
+        if(newOrderFromSite && loaded){
+          const id = newId();
+          const order = {id, ...newOrderFromSite, status:"New Order", time:nowTime(), date:todayDate(), isoDate:isoDate()};
+          setOrders(o => [order, ...o]);
+          showToast_(`🆕 New order ${id} auto-added!`);
+          clearNewOrder();
+        }
+      },[newOrderFromSite,loaded]);
+
+      function showToast_(m){ setToast(m); setTimeout(()=>setToast(""), 2800); }
+
+      function addFormItem(){ setForm(f => ({...f, items:[...f.items, {name:MENU_NAMES[0],qty:1}]})); }
+      function removeFormItem(i){ setForm(f => ({...f, items:f.items.filter((_,idx)=>idx!==i)})); }
+      function updateFormItem(i,field,val){ setForm(f => { const items=[...f.items]; items[i]={...items[i],[field]:field==="qty"?Math.max(1,+val):val}; return {...f,items}; }); }
+
+      function submitOrder(){
+        if(!form.customer||!form.phone) return;
+        const id = newId();
+        setOrders(o => [{id,...form,status:"New Order",time:nowTime(),date:todayDate(),isoDate:isoDate()},...o]);
+        setShowForm(false);
+        setForm({customer:"",phone:"",address:"",note:"",items:[{name:MENU_NAMES[0],qty:1}]});
+        showToast_("✅ "+id+" added & saved!");
+      }
+
+      function updateStatus(id,status){ setOrders(o => o.map(x => x.id===id ? {...x,status} : x)); }
+      function deleteOrder(id){ setOrders(o => o.filter(x => x.id!==id)); showToast_("🗑️ Deleted"); }
+
+      function notifyWA(order,status){
+        const ph = order.phone.replace(/\D/g,"");
+        if(!ph){ showToast_("⚠️ No phone number — update this order first!"); return; }
+        const itemsText = order.items.map(i=>`  • ${i.name} ×${i.qty} — ₹${PRICES[i.name]*i.qty}`).join("\n");
+        const fn = WA_MSG[status]; if(!fn) return;
+        const msg = fn(order.customer.split(" ")[0], itemsText, getTotal(order.items));
+        window.open(`https://wa.me/${ph.startsWith("91")?ph:"91"+ph}?text=${encodeURIComponent(msg)}`, "_blank");
+        showToast_("💬 WhatsApp opened for "+order.customer);
+      }
+
+      function notifyAndUpdate(order,status){ updateStatus(order.id,status); notifyWA({...order,status},status); }
+
+      // Export helpers (inside component to access state setters)
+      function generateCSV(exportOrders){
+        const rows = [["Order ID","Date","Time","Customer","Phone","Address","Items","Total (Rs)","Status","Note"]];
+        exportOrders.forEach(o=>{
+          const itemsStr = o.items.map(i=>`${i.name} x${i.qty}`).join(" | ");
+          rows.push([o.id,o.date||"",o.time||"",o.customer,o.phone,o.address||"",itemsStr,getTotal(o.items),o.status,o.note||""]);
+        });
+        return rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+      }
+      function exportCSV(exportOrders){ setCsvText(generateCSV(exportOrders)); setCopied(false); }
+      function copyCSV(){ navigator.clipboard.writeText(csvText).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);}); }
+
+      // Date range filter helpers
+      function getExportOrders(){
+        const today = isoDate(); const d = new Date();
+        if(exportRange==="today")   return orders.filter(o=>o.isoDate===today);
+        if(exportRange==="week"){   d.setDate(d.getDate()-7);       return orders.filter(o=>new Date(o.isoDate||"2000-01-01")>=d); }
+        if(exportRange==="month"){  d.setMonth(d.getMonth()-1);     return orders.filter(o=>new Date(o.isoDate||"2000-01-01")>=d); }
+        if(exportRange==="3month"){ d.setMonth(d.getMonth()-3);     return orders.filter(o=>new Date(o.isoDate||"2000-01-01")>=d); }
+        if(exportRange==="6month"){ d.setMonth(d.getMonth()-6);     return orders.filter(o=>new Date(o.isoDate||"2000-01-01")>=d); }
+        if(exportRange==="year"){   d.setFullYear(d.getFullYear()-1); return orders.filter(o=>new Date(o.isoDate||"2000-01-01")>=d); }
+        return orders;
+      }
+      function countRange(val){
+        if(val==="today")  return orders.filter(o=>o.isoDate===isoDate()).length;
+        const c=new Date();
+        if(val==="week")  { c.setDate(c.getDate()-7);       return orders.filter(o=>new Date(o.isoDate||"2000")>=c).length; }
+        if(val==="month") { c.setMonth(c.getMonth()-1);     return orders.filter(o=>new Date(o.isoDate||"2000")>=c).length; }
+        if(val==="3month"){ c.setMonth(c.getMonth()-3);     return orders.filter(o=>new Date(o.isoDate||"2000")>=c).length; }
+        if(val==="6month"){ c.setMonth(c.getMonth()-6);     return orders.filter(o=>new Date(o.isoDate||"2000")>=c).length; }
+        c.setFullYear(c.getFullYear()-1); return orders.filter(o=>new Date(o.isoDate||"2000")>=c).length;
+      }
+
+      const counts       = {};
+      STATUSES.forEach(s => counts[s] = orders.filter(o=>o.status===s).length);
+      const todayOrders  = orders.filter(o=>o.isoDate===isoDate());
+      const todayRevenue = todayOrders.filter(o=>o.status==="Delivered").reduce((s,o)=>s+getTotal(o.items),0);
+      const totalRevenue = orders.filter(o=>o.status==="Delivered").reduce((s,o)=>s+getTotal(o.items),0);
+      const filtered     = orders.filter(o=>{
+        const matchTab = tab==="all"||o.status===tab;
+        const q = search.toLowerCase();
+        const matchSearch = o.customer.toLowerCase().includes(q)||o.id.toLowerCase().includes(q)||o.phone.includes(q)||(o.date||"").includes(q);
+        return matchTab&&matchSearch;
+      });
+
+      if(!loaded) return (
+        <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",fontFamily:"Inter,sans-serif",fontSize:16,color:"#555"}}>
+          ⏳ Loading orders...
+        </div>
+      );
+
+      return(
+        <div style={{fontFamily:"'Inter',sans-serif",background:"#f5f5f5",minHeight:"100vh"}}>
+          {/* Header */}
+          <div style={{background:"#075E54",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <div>
+              <div style={{color:"#fff",fontWeight:900,fontSize:16}}>🍛 BKB Order Tracker</div>
+              <div style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>Auto-saving · Stores up to 1 year</div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>setShowExport(true)} style={{background:"#facc15",border:"none",color:"#000",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>⬇️ Download</button>
+              <button onClick={()=>setShowForm(true)} style={{background:"#25D366",border:"none",color:"#fff",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>➕ New Order</button>
+              <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",padding:"9px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>← Website</button>
+            </div>
+          </div>
+
+          <div style={{padding:"14px",maxWidth:900,margin:"0 auto"}}>
+            {/* Stats */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10,marginBottom:14}}>
+              {[
+                {l:"Total Orders",  v:orders.length,              e:"📋",c:"#075E54"},
+                {l:"Today",         v:todayOrders.length,         e:"📅",c:"#1a73e8"},
+                {l:"Cooking",       v:counts["Cooking"],          e:"🔥",c:"#ff6b00"},
+                {l:"On The Way",    v:counts["Out for Delivery"],  e:"🛵",c:"#7c3aed"},
+                {l:"Today Revenue", v:"₹"+todayRevenue,           e:"💰",c:"#25D366"},
+                {l:"All Revenue",   v:"₹"+totalRevenue,           e:"📈",c:"#065f46"},
+              ].map(s=>(
+                <div key={s.l} style={{background:"#fff",borderRadius:12,padding:"10px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:"4px solid "+s.c}}>
+                  <div style={{fontSize:16}}>{s.e}</div>
+                  <div style={{fontWeight:900,fontSize:16,color:s.c,marginTop:2}}>{s.v}</div>
+                  <div style={{fontSize:10,color:"#888",marginTop:1}}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Search */}
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search name, ID, phone, date..." style={{width:"100%",padding:"10px 16px",borderRadius:25,border:"1.5px solid #ddd",fontSize:13,marginBottom:10,outline:"none"}}/>
+
+            {/* Tabs */}
+            <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:6,marginBottom:12}}>
+              {["all",...STATUSES].map(t=>(
+                <button key={t} onClick={()=>setTab(t)} style={{background:tab===t?"#075E54":"#fff",color:tab===t?"#fff":"#555",border:"1.5px solid "+(tab===t?"#075E54":"#ddd"),padding:"6px 12px",borderRadius:20,fontWeight:600,fontSize:11,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                  {t==="all"?"All ("+orders.length+")":t+(counts[t]?" ("+counts[t]+")":"")}
+                </button>
+              ))}
+            </div>
+
+            {/* Order Cards */}
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {filtered.length===0&&<div style={{textAlign:"center",color:"#aaa",padding:40,background:"#fff",borderRadius:16}}>No orders found 🍽️</div>}
+              {filtered.map(o=>{
+                const c = STATUS_STYLE[o.status]||{bg:"#eee",text:"#333",dot:"#999"};
+                return(
+                  <div key={o.id} style={{background:"#fff",borderRadius:16,padding:"14px",boxShadow:"0 1px 6px rgba(0,0,0,0.07)",border:"1.5px solid #eee"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginBottom:4}}>
+                          <span style={{fontWeight:800,fontSize:14}}>{o.customer}</span>
+                          <span style={{fontSize:11,color:"#888",background:"#f0f0f0",padding:"2px 8px",borderRadius:10}}>{o.id}</span>
+                          <span style={{background:c.bg,color:c.text,padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",gap:4}}>
+                            <span style={{width:6,height:6,borderRadius:"50%",background:c.dot,display:"inline-block"}}/>{o.status}
+                          </span>
+                        </div>
+                        <div style={{fontSize:11,color:"#888"}}>📱 {o.phone} · 🕐 {o.time} · 📅 {o.date||"—"}</div>
+                        <div style={{fontSize:12,color:"#555",marginTop:3}}>{o.items.map(i=>`${i.name} ×${i.qty}`).join(", ")}</div>
+                        {o.address&&<div style={{fontSize:11,color:"#888",marginTop:2}}>📍 {o.address}</div>}
+                        {o.note&&<div style={{fontSize:11,color:"#aaa",marginTop:2}}>📝 {o.note}</div>}
+                      </div>
+                      <div style={{fontWeight:900,fontSize:16,color:"#075E54",whiteSpace:"nowrap"}}>₹{getTotal(o.items)}</div>
+                    </div>
+                    <div style={{marginTop:10,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      {NEXT[o.status]&&(
+                        <button onClick={()=>notifyAndUpdate(o,NEXT[o.status])} style={{fontSize:12,padding:"7px 14px",borderRadius:20,border:"none",background:"#075E54",color:"#fff",cursor:"pointer",fontWeight:700}}>
+                          ➡️ {NEXT[o.status]}
+                        </button>
+                      )}
+                      {WA_MSG[o.status]&&(
+                        <button onClick={()=>notifyWA(o,o.status)} style={{fontSize:12,padding:"6px 12px",borderRadius:20,border:"1.5px solid #25D366",background:"#f0fdf4",color:"#075E54",cursor:"pointer",fontWeight:700}}>
+                          💬 Notify
+                        </button>
+                      )}
+                      {o.status!=="Cancelled"&&o.status!=="Delivered"&&(
+                        <button onClick={()=>notifyAndUpdate(o,"Cancelled")} style={{fontSize:11,padding:"5px 10px",borderRadius:15,border:"1.5px solid #fcc",background:"#fff0f0",cursor:"pointer",fontWeight:600,color:"#c00"}}>✕ Cancel</button>
+                      )}
+                      <button onClick={()=>deleteOrder(o.id)} style={{fontSize:11,padding:"5px 10px",borderRadius:15,border:"1.5px solid #eee",background:"#fafafa",cursor:"pointer",color:"#aaa",marginLeft:"auto"}}>🗑️</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* EXPORT MODAL */}
+          {showExport&&(
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowExport(false)}>
+              <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:24,padding:28,width:"100%",maxWidth:360,maxHeight:"90vh",overflowY:"auto"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}>
+                  <span style={{fontWeight:900,fontSize:18}}>⬇️ Download Orders</span>
+                  <button onClick={()=>setShowExport(false)} style={{background:"#f0f0f0",border:"none",width:30,height:30,borderRadius:"50%",cursor:"pointer"}}>✕</button>
+                </div>
+                <p style={{fontSize:13,color:"#666",marginBottom:16}}>Select the date range to download as a CSV file you can open in Excel or Google Sheets.</p>
+                <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+                  {[["today","📅 Today only"],["week","📅 Last 7 days"],["month","📅 Last 1 month"],["3month","📅 Last 3 months"],["6month","📅 Last 6 months"],["year","📅 Last 1 year (full)"]].map(([val,label])=>(
+                    <label key={val} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:12,border:`1.5px solid ${exportRange===val?"#075E54":"#ddd"}`,background:exportRange===val?"#f0fdf4":"#fff",cursor:"pointer",fontSize:13,fontWeight:exportRange===val?700:400}}>
+                      <input type="radio" value={val} checked={exportRange===val} onChange={()=>setExportRange(val)} style={{accentColor:"#075E54"}}/>
+                      {label}
+                      <span style={{marginLeft:"auto",fontSize:11,color:"#888"}}>{countRange(val)} orders</span>
+                    </label>
+                  ))}
+                </div>
+                <button onClick={()=>exportCSV(getExportOrders())} style={{width:"100%",background:"#075E54",border:"none",color:"#fff",padding:14,borderRadius:14,fontWeight:800,fontSize:15,cursor:"pointer"}}>
+                  ⬇️ Generate CSV
+                </button>
+                {csvText?(
+                  <div style={{marginTop:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <span style={{fontSize:12,fontWeight:700,color:"#555"}}>📋 Copy this CSV text:</span>
+                      <button onClick={copyCSV} style={{background:copied?"#25D366":"#075E54",border:"none",color:"#fff",padding:"6px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                        {copied?"✅ Copied!":"📋 Copy All"}
+                      </button>
+                    </div>
+                    <textarea readOnly value={csvText} rows={6} style={{width:"100%",padding:10,borderRadius:10,border:"1.5px solid #ddd",fontSize:11,fontFamily:"monospace",resize:"vertical",outline:"none",background:"#f9f9f9"}}/>
+                    <div style={{background:"#fff3cd",borderRadius:10,padding:"10px 12px",marginTop:8,fontSize:12,color:"#856404",lineHeight:1.6}}>
+                      <strong>How to save as Excel/Sheets:</strong><br/>
+                      1. Click "Copy All" above<br/>
+                      2. Open <strong>Google Sheets</strong> → paste in cell A1<br/>
+                      3. Or open <strong>Excel</strong> → paste → "Text to Columns"<br/>
+                      4. Or save as <strong>orders.csv</strong> in Notepad/TextEdit
+                    </div>
+                  </div>
+                ):null}
+                <p style={{fontSize:11,color:"#aaa",textAlign:"center",marginTop:10}}>Opens in Excel, Google Sheets or Numbers</p>
+              </div>
+            </div>
+          )}
+
+          {/* NEW ORDER MODAL */}
+          {showForm&&(
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setShowForm(false)}>
+              <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:"24px 24px 0 0",padding:"24px 20px",width:"100%",maxWidth:500,maxHeight:"90vh",overflowY:"auto"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}>
+                  <span style={{fontWeight:900,fontSize:17}}>➕ New Order</span>
+                  <button onClick={()=>setShowForm(false)} style={{background:"#f0f0f0",border:"none",width:30,height:30,borderRadius:"50%",cursor:"pointer"}}>✕</button>
+                </div>
+                {[["Customer Name","customer","text","e.g. Ravi Kumar"],["Phone","phone","tel","9876543210"],["Address","address","text","Delivery address"],["Note","note","text","Special instructions"]].map(([label,key,type,ph])=>(
+                  <div key={key} style={{marginBottom:10}}>
+                    <label style={{fontSize:12,fontWeight:700,color:"#555",display:"block",marginBottom:4}}>{label}</label>
+                    <input type={type} placeholder={ph} value={form[key]} onChange={e=>setForm(f=>({...f,[key]:e.target.value}))} style={{width:"100%",padding:"10px 14px",borderRadius:12,border:"1.5px solid #ddd",fontSize:14,outline:"none"}}/>
+                  </div>
+                ))}
+                <div style={{fontWeight:700,fontSize:13,color:"#555",marginBottom:8}}>🍽️ Items</div>
+                {form.items.map((item,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+                    <select value={item.name} onChange={e=>updateFormItem(i,"name",e.target.value)} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid #ddd",fontSize:12,background:"#fff"}}>
+                      {MENU_NAMES.map(m=><option key={m} value={m}>{m} — ₹{PRICES[m]}</option>)}
+                    </select>
+                    <input type="number" min="1" value={item.qty} onChange={e=>updateFormItem(i,"qty",e.target.value)} style={{width:50,padding:"9px 6px",borderRadius:10,border:"1.5px solid #ddd",fontSize:13,textAlign:"center"}}/>
+                    {form.items.length>1&&<button onClick={()=>removeFormItem(i)} style={{background:"#fee",border:"none",borderRadius:8,padding:"6px 8px",cursor:"pointer",color:"#c00",fontSize:12}}>✕</button>}
+                  </div>
+                ))}
+                <button onClick={addFormItem} style={{background:"#f0fdf4",border:"1.5px dashed #25D366",color:"#25D366",borderRadius:10,padding:"8px",fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:14,width:"100%"}}>+ Add Item</button>
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,marginBottom:14,padding:"10px 14px",background:"#f0fdf4",borderRadius:10}}>
+                  <span>Total</span><span style={{color:"#075E54"}}>₹{getTotal(form.items)}</span>
+                </div>
+                <button onClick={submitOrder} disabled={!form.customer||!form.phone} style={{width:"100%",background:form.customer&&form.phone?"#25D366":"#ccc",border:"none",color:"#fff",padding:15,borderRadius:25,fontWeight:800,fontSize:15,cursor:form.customer&&form.phone?"pointer":"not-allowed"}}>✅ Add Order</button>
+              </div>
+            </div>
+          )}
+
+          {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"#1a1a1a",color:"#fff",padding:"11px 22px",borderRadius:50,fontWeight:700,fontSize:13,zIndex:200,whiteSpace:"nowrap",boxShadow:"0 8px 30px rgba(0,0,0,0.3)"}}>{toast}</div>}
+        </div>
+      );
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ADMIN LOGIN
+    // ═════════════════════════════════════════════════════════════════════════════
+    function AdminLogin({onSuccess, onBack}){
+      const [pw,setPw]   = useState("");
+      const [err,setErr] = useState(false);
+      function tryLogin(){ if(pw===ADMIN_PASSWORD) onSuccess(); else{ setErr(true); setTimeout(()=>setErr(false),2000); } }
+      return(
+        <div style={{minHeight:"100vh",background:"#075E54",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:24,padding:32,width:"100%",maxWidth:320,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+            <div style={{fontSize:"3rem",marginBottom:10}}>🔐</div>
+            <h2 style={{fontWeight:900,fontSize:20,marginBottom:6}}>Owner Access</h2>
+            <p style={{fontSize:12,color:"#888",marginBottom:22}}>Enter password to open Order Tracker</p>
+            <input type="password" placeholder="Password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&tryLogin()} style={{width:"100%",padding:"12px 16px",borderRadius:12,border:`1.5px solid ${err?"#e74c3c":"#ddd"}`,fontSize:16,outline:"none",marginBottom:8,textAlign:"center",letterSpacing:4}}/>
+            {err&&<p style={{color:"#e74c3c",fontSize:12,marginBottom:8}}>❌ Wrong password!</p>}
+            <button onClick={tryLogin} style={{width:"100%",background:"#075E54",border:"none",color:"#fff",padding:13,borderRadius:12,fontWeight:800,fontSize:15,cursor:"pointer",marginBottom:10}}>🔓 Login</button>
+            <button onClick={onBack} style={{width:"100%",background:"#f5f5f5",border:"none",color:"#555",padding:11,borderRadius:12,fontWeight:600,fontSize:14,cursor:"pointer"}}>← Back to Website</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ROOT
+    // ═════════════════════════════════════════════════════════════════════════════
+    function App(){
+      const [view,setView]                 = useState("site");
+      const [cart,setCart]                 = useState({});
+      const [pendingOrder,setPendingOrder] = useState(null);
+
+      function handlePlaceOrder(cartData){
+        const items = Object.entries(cartData).map(([id,qty])=>{ const it=ALL_ITEMS.find(i=>i.id===+id); return {name:it.name,qty}; });
+        setPendingOrder({customer:"Website Customer",phone:"",address:"",note:"Via Website Cart",items});
+      }
+
+      return(
+        <React.Fragment>
+          {view==="site"    && <CustomerSite cart={cart} setCart={setCart} onAdminOpen={()=>setView("login")} onPlaceOrder={handlePlaceOrder}/>}
+          {view==="login"   && <AdminLogin onSuccess={()=>setView("tracker")} onBack={()=>setView("site")}/>}
+          {view==="tracker" && <OwnerTracker onBack={()=>setView("site")} newOrderFromSite={pendingOrder} clearNewOrder={()=>setPendingOrder(null)}/>}
+        </React.Fragment>
+      );
+    }
+
+    // Mount the app
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App/>);
+  </script>
+</body>
+</html>
