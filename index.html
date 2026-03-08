@@ -318,7 +318,7 @@ function CustomerSite({cart,setCart,onAdminOpen,onPlaceOrder}){
 }
 
 // ═══════════════════════════════════════════════════════ OWNER TRACKER
-function OwnerTracker({onBack}){
+function OwnerTracker({onBack,onLogout}){
   const [orders,setOrders]           = useState([]);
   const [loaded,setLoaded]           = useState(false);
   const [tab,setTab]                 = useState("all");
@@ -332,14 +332,15 @@ function OwnerTracker({onBack}){
   const [form,setForm]               = useState({customer:"",phone:"",address:"",note:"",items:[{name:MENU_NAMES[0],qty:1}]});
   const [newCount,setNewCount]       = useState(0);
 
+  // Load fresh from localStorage - NEVER overwrites, only reads
   function refreshOrders(silent){
     loadOrders().then(saved=>{
       syncIdCounter(saved);
       const fresh = saved.length?saved:[];
       setOrders(prev=>{
-        const prevNew = prev.filter(o=>o.status==="New Order").length;
-        const nextNew = fresh.filter(o=>o.status==="New Order").length;
-        if(!silent && nextNew > prevNew) setNewCount(nextNew - prevNew);
+        const prevIds = new Set(prev.map(o=>o.id));
+        const brandNew = fresh.filter(o=>!prevIds.has(o.id)&&o.status==="New Order");
+        if(!silent && brandNew.length>0) setNewCount(n=>n+brandNew.length);
         return fresh;
       });
       if(!loaded) setLoaded(true);
@@ -349,14 +350,31 @@ function OwnerTracker({onBack}){
   // Initial load
   useEffect(()=>{ refreshOrders(true); },[]);
 
-  // Auto-refresh every 15 seconds to catch new customer orders
+  // Listen for instant same-tab event when customer places order
   useEffect(()=>{
-    const timer = setInterval(()=>refreshOrders(false), 15000);
-    return ()=>clearInterval(timer);
-  },[loaded]);
+    function onNewOrder(){ refreshOrders(false); }
+    window.addEventListener("bkb-new-order", onNewOrder);
+    return ()=>window.removeEventListener("bkb-new-order", onNewOrder);
+  },[]);
 
-  // Save whenever orders change (after initial load)
-  useEffect(()=>{ if(loaded) saveOrders(orders); },[orders,loaded]);
+  // Listen for cross-tab storage changes (other browser tab)
+  useEffect(()=>{
+    function onStorage(e){
+      if(e.key==="bkb-orders-v1") refreshOrders(false);
+    }
+    window.addEventListener("storage", onStorage);
+    return ()=>window.removeEventListener("storage", onStorage);
+  },[]);
+
+  // Fallback poll every 5 seconds
+  useEffect(()=>{
+    const t = setInterval(()=>refreshOrders(false), 5000);
+    return ()=>clearInterval(t);
+  },[]);
+
+  // Save ONLY when owner explicitly changes something (status, add, delete)
+  // Not on auto-refresh - this prevents overwriting customer orders
+  function saveSnapshot(updated){ saveOrders(updated); }
 
   function showT(m){ setToast(m); setTimeout(()=>setToast(""),2800); }
 
@@ -367,14 +385,31 @@ function OwnerTracker({onBack}){
   function submitOrder(){
     if(!form.customer||!form.phone) return;
     const id=newId();
-    setOrders(o=>[{id,...form,status:"New Order",time:nowTime(),date:todayDate(),isoDate:isoDate()},...o]);
+    setOrders(prev=>{
+      const updated=[{id,...form,status:"New Order",time:nowTime(),date:todayDate(),isoDate:isoDate()},...prev];
+      saveSnapshot(updated);
+      return updated;
+    });
     setShowForm(false);
     setForm({customer:"",phone:"",address:"",note:"",items:[{name:MENU_NAMES[0],qty:1}]});
     showT(id+" added and saved!");
   }
 
-  function updateStatus(id,status){ setOrders(o=>o.map(x=>x.id===id?{...x,status}:x)); }
-  function deleteOrder(id){ setOrders(o=>o.filter(x=>x.id!==id)); showT("Deleted"); }
+  function updateStatus(id,status){
+    setOrders(prev=>{
+      const updated=prev.map(x=>x.id===id?{...x,status}:x);
+      saveSnapshot(updated);
+      return updated;
+    });
+  }
+  function deleteOrder(id){
+    setOrders(prev=>{
+      const updated=prev.filter(x=>x.id!==id);
+      saveSnapshot(updated);
+      return updated;
+    });
+    showT("Deleted");
+  }
 
   function notifyWA(order,status){
     const ph=(order.phone||"").replace(/\D/g,"");
@@ -441,13 +476,14 @@ function OwnerTracker({onBack}){
       <div style={{background:"#075E54",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
         <div>
           <div style={{color:"#fff",fontWeight:900,fontSize:16}}>BKB Order Tracker</div>
-          <div style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>Auto-refreshes every 15s</div>
+          <div style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>Live updates - auto-syncs instantly</div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={()=>{ refreshOrders(false); showT("Refreshed!"); }} style={{background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",padding:"9px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>🔄 Refresh</button>
           <button onClick={()=>setShowExport(true)} style={{background:"#facc15",border:"none",color:"#000",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>Download</button>
-          <button onClick={()=>setShowForm(true)} style={{background:"#25D366",border:"none",color:"#fff",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>New Order</button>
-          <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",padding:"9px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>Back</button>
+          <button onClick={()=>setShowForm(true)} style={{background:"#25D366",border:"none",color:"#fff",padding:"9px 14px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>+ New Order</button>
+          <button onClick={onBack} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",padding:"9px 12px",borderRadius:20,fontWeight:700,fontSize:12,cursor:"pointer"}}>Website</button>
+          <button onClick={onLogout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",color:"rgba(255,255,255,0.7)",padding:"9px 12px",borderRadius:20,fontWeight:600,fontSize:12,cursor:"pointer"}}>Logout</button>
         </div>
       </div>
       {newCount>0&&(
@@ -619,8 +655,20 @@ function AdminLogin({onSuccess,onBack}){
 
 // ═══════════════════════════════════════════════════════ ROOT
 function App(){
-  const [view,setView] = useState("site");
-  const [cart,setCart] = useState({});
+  const [view,setView]           = useState("site");
+  const [cart,setCart]           = useState({});
+  const [ownerAuth,setOwnerAuth] = useState(()=>sessionStorage.getItem("bkb-auth")==="1");
+
+  function ownerLogin(){
+    sessionStorage.setItem("bkb-auth","1");
+    setOwnerAuth(true);
+    setView("tracker");
+  }
+  function ownerLogout(){
+    sessionStorage.removeItem("bkb-auth");
+    setOwnerAuth(false);
+    setView("site");
+  }
 
   async function handlePlaceOrder(cartData,customerName,customerPhone,customerAddress){
     const items=Object.entries(cartData).map(([id,qty])=>{const it=ALL_ITEMS.find(i=>i.id===+id);return{name:it.name,qty};});
@@ -640,13 +688,18 @@ function App(){
       isoDate: isoDate()
     };
     await saveOrders([newOrder, ...existing]);
+    // Instantly signal tracker (same-tab)
+    window.dispatchEvent(new CustomEvent("bkb-new-order", {detail:{id}}));
+    // Auto-redirect: owner goes to tracker, or to login if not yet authenticated
+    if(ownerAuth) setView("tracker");
+    else setView("login");
   }
 
   return(
     <React.Fragment>
-      {view==="site"    && <CustomerSite cart={cart} setCart={setCart} onAdminOpen={()=>setView("login")} onPlaceOrder={handlePlaceOrder}/>}
-      {view==="login"   && <AdminLogin onSuccess={()=>setView("tracker")} onBack={()=>setView("site")}/>}
-      {view==="tracker" && <OwnerTracker onBack={()=>setView("site")}/>}
+      {view==="site"    && <CustomerSite cart={cart} setCart={setCart} onAdminOpen={()=>{ ownerAuth?setView("tracker"):setView("login"); }} onPlaceOrder={handlePlaceOrder}/>}
+      {view==="login"   && <AdminLogin onSuccess={ownerLogin} onBack={()=>setView("site")}/>}
+      {view==="tracker" && <OwnerTracker onBack={()=>setView("site")} onLogout={ownerLogout}/>}
     </React.Fragment>
   );
 }
