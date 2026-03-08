@@ -111,8 +111,19 @@
     // CUSTOMER WEBSITE
     // ═════════════════════════════════════════════════════════════════════════════
     function CustomerSite({cart, setCart, onAdminOpen, onPlaceOrder}){
-      const [cartOpen, setCartOpen] = useState(false);
-      const [toast, setToast]       = useState("");
+      const [cartOpen, setCartOpen]         = useState(false);
+      const [toast, setToast]               = useState("");
+      const [checkoutOpen, setCheckoutOpen] = useState(false);
+      const [cusName, setCusName]           = useState("");
+      const [cusPhone, setCusPhone]         = useState("");
+      const [cusAddress, setCusAddress]     = useState("");
+      const [cusLocation, setCusLocation]   = useState(null);  // {lat, lng, url}
+      const [locLoading, setLocLoading]     = useState(false);
+      const [locErr, setLocErr]             = useState("");
+      const [formErr, setFormErr]           = useState("");
+      const [cusLocation, setCusLocation]   = useState(null);  // {lat, lng, url}
+      const [locLoading, setLocLoading]     = useState(false);
+      const [locErr, setLocErr]             = useState("");
       const sf = {saffron:"#FF6B00", gold:"#FFB347", dark:"#1A0A00", cream:"#FFF8F0"};
 
       function addItem(id){ setCart(c => ({...c, [id]:(c[id]||0)+1})); }
@@ -122,18 +133,50 @@
 
       function showToast(m){ setToast(m); setTimeout(()=>setToast(""), 2500); }
 
+      // Open checkout details popup
       function orderOnWA(){
         if(!count) return;
+        setFormErr(""); setLocErr(""); setCusLocation(null);
+        setCheckoutOpen(true);
+      }
+
+      // Get GPS and build Google Maps link
+      function shareLocation(){
+        if(!navigator.geolocation){ setLocErr("Location not supported on this device"); return; }
+        setLocLoading(true); setLocErr("");
+        navigator.geolocation.getCurrentPosition(
+          (pos)=>{
+            const lat = pos.coords.latitude.toFixed(6);
+            const lng = pos.coords.longitude.toFixed(6);
+            setCusLocation({lat, lng, url:`https://maps.google.com/?q=${lat},${lng}`});
+            setLocLoading(false);
+          },
+          (err)=>{
+            setLocLoading(false);
+            if(err.code===1) setLocErr("Location blocked. Please allow location access in your browser, or type your address.");
+            else setLocErr("Couldn't get location. Please type your address manually.");
+          },
+          {enableHighAccuracy:true, timeout:10000}
+        );
+      }
+
+      // Validate, build WA message, send to tracker
+      function confirmOrder(){
+        if(!cusName.trim()){ setFormErr("Please enter your name"); return; }
+        if(cusPhone.replace(/\D/g,"").length < 10){ setFormErr("Please enter a valid 10-digit phone number"); return; }
+        if(!cusAddress.trim() && !cusLocation){ setFormErr("Please enter your address or share your location"); return; }
         const lines = Object.entries(cart).map(([id,q]) => {
           const it = ALL_ITEMS.find(i=>i.id===+id);
           return `  ${it.emoji} ${it.name} ×${q} — ₹${it.price*q}`;
         });
-        const msg = `🍛 *Biriyani Kaavala Babu*\n\nHey! I'd like to place an order 😄\n\n*My Order:*\n${lines.join("\n")}\n\n💰 *Total: ₹${total}*\n\nPlease confirm & share payment details 🙏`;
-        onPlaceOrder(cart);
+        const locationLine = cusLocation ? "*\uD83D\uDCCD Location:* " + cusLocation.url : "*\uD83D\uDCCD Address:* " + cusAddress.trim();
+        const addrNote = (cusAddress.trim() && cusLocation) ? ("*Address note:* " + cusAddress.trim() + "\n") : "";
+        const msg = "🍛 *Biriyani Kaavala Babu*\n\nHey! New order 😄\n\n*Name:* " + cusName.trim() + "\n*Phone:* " + cusPhone.trim() + "\n" + locationLine + "\n" + addrNote + "\n*Order:*\n" + lines.join("\n") + "\n\n💰 *Total: ₹" + total + "*\n\nPlease confirm & share payment details 🙏";
+        onPlaceOrder(cart, cusName.trim(), cusPhone.trim(), cusAddress.trim(), cusLocation);
         window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, "_blank");
-        setCart({});
-        setCartOpen(false);
-        showToast("✅ Order sent to WhatsApp & Tracker!");
+        setCart({}); setCartOpen(false); setCheckoutOpen(false);
+        setCusName(""); setCusPhone(""); setCusAddress(""); setCusLocation(null); setFormErr("");
+        showToast("✅ Order sent to WhatsApp & saved to Tracker!");
       }
 
       function ItemCard({item}){
@@ -251,6 +294,56 @@
           )}
 
           {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"#25D366",color:"#fff",padding:"11px 22px",borderRadius:50,fontWeight:700,fontSize:13,zIndex:200,whiteSpace:"nowrap"}}>{toast}</div>}
+
+          {/* CHECKOUT DETAILS MODAL */}
+          {checkoutOpen&&(
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+              <div style={{background:"#1e0d00",borderRadius:"24px 24px 0 0",padding:"24px 20px",width:"100%",maxWidth:480,borderTop:"2px solid rgba(255,107,0,0.3)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+                  <span style={{fontFamily:"serif",fontSize:"1.1rem",fontWeight:900,color:sf.gold}}>📋 Your Details</span>
+                  <button onClick={()=>setCheckoutOpen(false)} style={{background:"rgba(255,107,0,0.15)",border:"1px solid rgba(255,107,0,0.3)",color:sf.saffron,width:30,height:30,borderRadius:"50%",cursor:"pointer",fontSize:13}}>✕</button>
+                </div>
+                <p style={{fontSize:12,color:"#d4b8a0",marginBottom:16}}>So we can track your order and send you updates 🙏</p>
+                {[
+                  ["Your Name *","text",cusName,setCusName,"e.g. Ravi Kumar"],
+                  ["Phone Number *","tel",cusPhone,setCusPhone,"e.g. 9876543210"],
+                  ["Delivery Address","text",cusAddress,setCusAddress,"Street, Area, Landmark"],
+                ].map(([label,type,val,setter,ph])=>(
+                  <div key={label} style={{marginBottom:12}}>
+                    <label style={{fontSize:11,fontWeight:700,color:"#d4b8a0",display:"block",marginBottom:4}}>{label}</label>
+                    <input type={type} placeholder={ph} value={val} onChange={e=>setter(e.target.value)}
+                      style={{width:"100%",padding:"11px 14px",borderRadius:12,border:"1.5px solid rgba(255,107,0,0.3)",fontSize:14,outline:"none",background:"#2d1200",color:sf.cream}}/>
+                  </div>
+                ))}
+                {/* Location sharing */}
+                <div style={{marginBottom:12}}>
+                  <label style={{fontSize:11,fontWeight:700,color:"#d4b8a0",display:"block",marginBottom:6}}>📍 Delivery Location</label>
+                  {!cusLocation ? (
+                    <button onClick={shareLocation} disabled={locLoading} style={{width:"100%",background:"rgba(255,107,0,0.12)",border:"1.5px solid rgba(255,107,0,0.4)",color:sf.saffron,padding:"11px 14px",borderRadius:12,fontWeight:700,fontSize:13,cursor:locLoading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                      {locLoading ? "📡 Getting location..." : "📍 Share My Google Maps Location"}
+                    </button>
+                  ) : (
+                    <div style={{background:"rgba(37,211,102,0.1)",border:"1.5px solid rgba(37,211,102,0.4)",borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700,color:"#25D366"}}>✅ Location shared!</div>
+                        <div style={{fontSize:10,color:"#d4b8a0",marginTop:2}}>{cusLocation.lat}, {cusLocation.lng}</div>
+                      </div>
+                      <button onClick={()=>{setCusLocation(null);setLocErr("");}} style={{background:"rgba(255,107,0,0.15)",border:"1px solid rgba(255,107,0,0.3)",color:sf.saffron,padding:"5px 10px",borderRadius:8,fontSize:11,cursor:"pointer",fontWeight:700}}>✕ Remove</button>
+                    </div>
+                  )}
+                  {locErr&&<div style={{fontSize:11,color:"#ff6b6b",marginTop:6}}>⚠️ {locErr}</div>}
+                </div>
+
+                {formErr&&<div style={{background:"rgba(231,76,60,0.15)",border:"1px solid rgba(231,76,60,0.4)",color:"#ff6b6b",borderRadius:10,padding:"8px 12px",fontSize:12,marginBottom:12}}>⚠️ {formErr}</div>}
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,padding:"10px 14px",background:"rgba(255,107,0,0.1)",borderRadius:10,color:sf.cream,marginBottom:14}}>
+                  <span>Order Total</span><span style={{color:sf.saffron}}>₹{total}</span>
+                </div>
+                <button onClick={confirmOrder} style={{width:"100%",background:"#25D366",border:"none",color:"#fff",padding:15,borderRadius:28,fontWeight:800,fontSize:15,cursor:"pointer",boxShadow:"0 8px 25px rgba(37,211,102,0.4)"}}>
+                  💬 Confirm & Send to WhatsApp
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -441,7 +534,13 @@
                         </div>
                         <div style={{fontSize:11,color:"#888"}}>📱 {o.phone} · 🕐 {o.time} · 📅 {o.date||"—"}</div>
                         <div style={{fontSize:12,color:"#555",marginTop:3}}>{o.items.map(i=>`${i.name} ×${i.qty}`).join(", ")}</div>
-                        {o.address&&<div style={{fontSize:11,color:"#888",marginTop:2}}>📍 {o.address}</div>}
+                        {o.address&&<div style={{fontSize:11,color:"#888",marginTop:2}}>
+                      📍 {o.address.startsWith("https://maps") 
+                        ? <a href={o.address} target="_blank" rel="noreferrer" style={{color:"#1a73e8",fontWeight:700,textDecoration:"underline"}}>Open in Google Maps 🗺️</a>
+                        : o.address.includes("https://maps")
+                          ? <span>{o.address.split("https://maps")[0]} <a href={"https://maps"+o.address.split("https://maps")[1]} target="_blank" rel="noreferrer" style={{color:"#1a73e8",fontWeight:700,textDecoration:"underline"}}>Open in Google Maps 🗺️</a></span>
+                          : o.address}
+                    </div>}
                         {o.note&&<div style={{fontSize:11,color:"#aaa",marginTop:2}}>📝 {o.note}</div>}
                       </div>
                       <div style={{fontWeight:900,fontSize:16,color:"#075E54",whiteSpace:"nowrap"}}>₹{getTotal(o.items)}</div>
@@ -580,9 +679,10 @@
       const [cart,setCart]                 = useState({});
       const [pendingOrder,setPendingOrder] = useState(null);
 
-      function handlePlaceOrder(cartData){
+      function handlePlaceOrder(cartData, customerName, customerPhone, customerAddress, customerLocation){
         const items = Object.entries(cartData).map(([id,qty])=>{ const it=ALL_ITEMS.find(i=>i.id===+id); return {name:it.name,qty}; });
-        setPendingOrder({customer:"Website Customer",phone:"",address:"",note:"Via Website Cart",items});
+        const addrFull = [customerAddress, customerLocation].filter(Boolean).join(" | ");
+        setPendingOrder({customer:customerName||"Website Customer",phone:customerPhone||"",address:addrFull,note:"Via Website Cart",items});
       }
 
       return(
